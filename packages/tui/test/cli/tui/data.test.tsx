@@ -2993,15 +2993,16 @@ async function mountData(parents: Record<string, string>, costs: Record<string, 
   return { data, app }
 }
 
-test("syncs direct child session info with a navigated root", async () => {
+test("syncs descendant session info with a navigated root", async () => {
   const { data, app } = await mountData({ child: "root", sibling: "root", grandchild: "child" })
   try {
     await data.session.sync("root", { children: true })
     expect(data.session.get("root")?.id).toBe("root")
     expect(data.session.get("child")?.parentID).toBe("root")
     expect(data.session.get("sibling")?.parentID).toBe("root")
-    expect(data.session.get("grandchild")).toBeUndefined()
-    expect(data.session.family("root")).toEqual(["root", "child", "sibling"])
+    // Nested subagents hydrate too, so family unread state survives a restart.
+    expect(data.session.get("grandchild")?.parentID).toBe("child")
+    expect(data.session.family("root")).toEqual(["root", "child", "sibling", "grandchild"])
   } finally {
     app.renderer.destroy()
   }

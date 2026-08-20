@@ -1162,6 +1162,22 @@ export function createData(config: CreateDataInput) {
               : [],
           ])
           const sessions = [info, ...children]
+          // Hydrate deeper descendant levels too: the family index spans nested subagents,
+          // and a grandchild's unread state must survive a client restart.
+          const visited = new Set([sessionID, ...children.map((child) => child.id)])
+          let frontier = children.map((child) => child.id)
+          while (frontier.length > 0) {
+            const levels = await Promise.all(
+              frontier.map((parentID) =>
+                api()
+                  .session.list({ parentID, order: "desc" })
+                  .then((response) => response.data),
+              ),
+            )
+            const next = levels.flat().filter((child) => !visited.has(child.id) && visited.add(child.id))
+            sessions.push(...next)
+            frontier = next.map((child) => child.id)
+          }
           setStore(
             "session",
             "info",

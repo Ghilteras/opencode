@@ -85,6 +85,13 @@ async function renderSessionTabs(
         data: { branch: { current: "main", default: "main" } },
       })
     }
+    if (url.pathname === "/api/session" && url.searchParams.has("parentID")) {
+      const parentID = url.searchParams.get("parentID")
+      const children = Object.entries(options?.sessionParents ?? {})
+        .filter(([, parent]) => parent === parentID)
+        .map(([sessionID]) => sessionInfo(sessionID))
+      return json({ data: children, cursor: {} })
+    }
     const viewed = url.pathname.match(/^\/api\/session\/([^/]+)\/view$/)?.[1]
     if (viewed && request.method === "POST") {
       views.push(viewed)
@@ -96,20 +103,22 @@ async function renderSessionTabs(
     if (!sessionID) return undefined
     sessions.push(sessionID)
     await options?.sessionGate
-    return json({
-      data: {
-        id: sessionID,
-        parentID: options?.sessionParents?.[sessionID],
-        title: sessionID === initialSessionID ? options?.title : undefined,
-        projectID: "project",
-        location: { directory: options?.sessionDirectories?.[sessionID] ?? directory },
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        outcome: options?.sessionOutcomes?.[sessionID],
-        time: { created: 0, updated: 0, ...sessionTimes[sessionID] },
-      },
-    })
+    return json({ data: sessionInfo(sessionID) })
   }, events)
+
+  function sessionInfo(sessionID: string) {
+    return {
+      id: sessionID,
+      parentID: options?.sessionParents?.[sessionID],
+      title: sessionID === initialSessionID ? options?.title : undefined,
+      projectID: "project",
+      location: { directory: options?.sessionDirectories?.[sessionID] ?? directory },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      outcome: options?.sessionOutcomes?.[sessionID],
+      time: { created: 0, updated: 0, ...sessionTimes[sessionID] },
+    }
+  }
   let tabs!: ReturnType<typeof useSessionTabs>
   let route!: ReturnType<typeof useRoute>
   let client!: ReturnType<typeof useClient>
@@ -398,6 +407,25 @@ test("views unread child sessions through their root tab", async () => {
     setup.focus()
     await wait(() => setup.views.includes("child"))
     expect(setup.views).not.toContain("root")
+  } finally {
+    await setup.destroy()
+  }
+})
+
+test("aggregates and acknowledges unread grandchildren after a restart", async () => {
+  const setup = await renderSessionTabs("root", {
+    home: true,
+    persisted: ["root"],
+    sessionParents: { child: "root", grandchild: "child" },
+    sessionTimes: { grandchild: { idle: 2 } },
+  })
+  try {
+    // No manual syncs: tab prefetch alone must hydrate the nested subagent.
+    await wait(() => setup.tabs.status("root").unread === "activity")
+
+    setup.route.navigate({ type: "session", sessionID: "root" })
+    await wait(() => setup.views.includes("grandchild"))
+    expect(setup.views).toEqual(["grandchild"])
   } finally {
     await setup.destroy()
   }
