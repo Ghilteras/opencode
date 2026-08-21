@@ -32,6 +32,7 @@ import { Permission } from "@opencode-ai/core/permission"
 import { PluginRuntime } from "@opencode-ai/core/plugin/runtime"
 import { PluginSupervisor } from "@opencode-ai/core/plugin/supervisor"
 import { Shell } from "@opencode-ai/core/shell"
+import { ShellSelect } from "@opencode-ai/core/shell/select"
 import { Shell as ShellSchema } from "@opencode-ai/schema/shell"
 import { ShellTool } from "@opencode-ai/core/tool/plugin/shell"
 import { ToolOutput } from "@opencode-ai/core/tool-output"
@@ -136,6 +137,7 @@ const shellPluginSupervisor = makeLocationNode({
     Permission.node,
     PluginRuntime.node,
     Shell.node,
+    ShellSelect.node,
     Tool.node,
   ],
 })
@@ -167,6 +169,7 @@ const call = (input: typeof ShellTool.Input.Type, id = "call-shell") => ({
 })
 
 const isWindows = process.platform === "win32"
+const terminalOnlyIt = isWindows ? productionIt.live.skip : productionIt.live
 const cwdCommand = isWindows ? "(Get-Location).Path; Start-Sleep -Milliseconds 100" : "pwd"
 const helloCommand = isWindows ? "[Console]::Out.Write('hello'); Start-Sleep -Milliseconds 100" : "printf hello"
 const stderrCommand = isWindows
@@ -214,6 +217,44 @@ const withSession = <A, E, R>(directory: string, body: (registry: Tool.Interface
   })
 
 describe("ShellTool", () => {
+  terminalOnlyIt("uses an acceptable shell without changing the user shell", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => {
+        reset()
+        return withSession(tmp.path, (registry) =>
+          Effect.gen(function* () {
+            const shellSelect = yield* ShellSelect.Service
+            const preferred = yield* shellSelect.preferred()
+            const configured = path.join(tmp.path, "fish")
+            yield* Effect.promise(() => fs.symlink(preferred, configured))
+            yield* shellSelect.transform((draft) => draft.configure(configured))
+
+            const acceptable = yield* shellSelect.acceptable()
+            expect(yield* shellSelect.preferred()).toBe(configured)
+            expect(acceptable).not.toBe(configured)
+
+            const shell = yield* Shell.Service
+            const direct = yield* shell.create({ command: "printf direct", timeout: 0 })
+            expect(direct.shell).toBe(configured)
+            yield* shell.wait(direct.id)
+
+            const progress: Tool.Metadata[] = []
+            const settled = yield* executeTool(registry, {
+              ...call({ command: "printf tool" }),
+              progress: (update) => Effect.sync(() => progress.push(update)),
+            })
+            expect(settled.status).toBe("completed")
+            const shellID = progress[0]?.shellID
+            if (typeof shellID !== "string") yield* Effect.die(new Error("Missing shell ID"))
+            expect((yield* shell.get(ShellSchema.ID.make(shellID))).shell).toBe(acceptable)
+          }),
+        )
+      },
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   productionIt.live(
     "registers and returns real successful output from the active Location",
     () =>

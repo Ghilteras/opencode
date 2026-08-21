@@ -13,6 +13,7 @@ import { NonNegativeInt } from "../../schema.js"
 import { SessionSchema } from "../../session/schema.js"
 import { Shell } from "../../shell.js"
 import { ShellParse } from "../../shell/parse.js"
+import { ShellSelect } from "../../shell/select.js"
 import { ToolOutput } from "../../tool-output.js"
 
 export const name = "shell"
@@ -102,6 +103,7 @@ export const Plugin = {
     const environment = yield* Environment.Service
     const mutation = yield* LocationMutation.Service
     const shell = yield* Shell.Service
+    const shellSelect = yield* ShellSelect.Service
     const permission = yield* Permission.Service
     const config = yield* Config.Service
 
@@ -239,6 +241,7 @@ export const Plugin = {
                     if (workdir !== "directory")
                       return yield* Effect.fail(new Error(`Working directory is not a directory: ${target.absolute}`))
                   }),
+                { acceptable: true },
               )
               yield* context.progress({ shellID: info.id })
 
@@ -343,7 +346,7 @@ export const Plugin = {
       Effect.gen(function* () {
         const tool = event.tools[name]
         if (!tool) return
-        tool.description = description(yield* shell.name())
+        tool.description = description(ShellSelect.name(yield* shellSelect.acceptable()))
       }),
     )
   }),
