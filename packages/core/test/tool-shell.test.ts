@@ -137,7 +137,6 @@ const shellPluginSupervisor = makeLocationNode({
     Permission.node,
     PluginRuntime.node,
     Shell.node,
-    ShellSelect.node,
     Tool.node,
   ],
 })
@@ -217,7 +216,7 @@ const withSession = <A, E, R>(directory: string, body: (registry: Tool.Interface
   })
 
 describe("ShellTool", () => {
-  terminalOnlyIt("uses an acceptable shell without changing the user shell", () =>
+  terminalOnlyIt("uses a conventional shell without changing the user shell", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),
       (tmp) => {
@@ -230,11 +229,12 @@ describe("ShellTool", () => {
             yield* Effect.promise(() => fs.symlink(preferred, configured))
             yield* shellSelect.transform((draft) => draft.configure(configured))
 
-            const acceptable = yield* shellSelect.acceptable()
+            const conventional = yield* shellSelect.conventional()
             expect(yield* shellSelect.preferred()).toBe(configured)
-            expect(acceptable).not.toBe(configured)
+            expect(conventional).not.toBe(configured)
 
             const shell = yield* Shell.Service
+            expect(yield* shell.conventionalName()).toBe(ShellSelect.name(conventional))
             const direct = yield* shell.create({ command: "printf direct", timeout: 0 })
             expect(direct.shell).toBe(configured)
             yield* shell.wait(direct.id)
@@ -247,7 +247,7 @@ describe("ShellTool", () => {
             expect(settled.status).toBe("completed")
             const shellID = progress[0]?.shellID
             if (typeof shellID !== "string") yield* Effect.die(new Error("Missing shell ID"))
-            expect((yield* shell.get(ShellSchema.ID.make(shellID))).shell).toBe(acceptable)
+            expect((yield* shell.get(ShellSchema.ID.make(shellID))).shell).toBe(conventional)
           }),
         )
       },

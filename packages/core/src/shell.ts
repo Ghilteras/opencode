@@ -56,7 +56,12 @@ export interface Interface {
   readonly create: <E = never, R = never>(
     input: Shell.CreateInput,
     before?: (input: ShellCreateBefore) => Effect.Effect<void, E, R>,
-    options?: CreateOptions,
+  ) => Effect.Effect<Shell.Info, E | AppProcess.AppProcessError, R>
+  // Uses the configured shell when conventional; otherwise uses the platform fallback.
+  readonly conventionalName: () => Effect.Effect<string>
+  readonly createConventional: <E = never, R = never>(
+    input: Shell.CreateInput,
+    before?: (input: ShellCreateBefore) => Effect.Effect<void, E, R>,
   ) => Effect.Effect<Shell.Info, E | AppProcess.AppProcessError, R>
   // Currently running commands only; exited shells are retained for get/output but excluded here.
   readonly list: () => Effect.Effect<Shell.Info[]>
@@ -68,10 +73,6 @@ export interface Interface {
   readonly timeout: (id: Shell.ID, duration: number) => Effect.Effect<Shell.Info, NotFoundError>
   readonly output: (id: Shell.ID, input?: Shell.OutputInput) => Effect.Effect<Shell.Output, NotFoundError>
   readonly remove: (id: Shell.ID) => Effect.Effect<void, NotFoundError>
-}
-
-export interface CreateOptions {
-  readonly acceptable?: boolean
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Shell") {}
@@ -191,6 +192,7 @@ const layer = () =>
       })
 
       const name = () => shell.preferred().pipe(Effect.map(ShellSelect.name))
+      const conventionalName = () => shell.conventional().pipe(Effect.map(ShellSelect.name))
 
       const output = Effect.fnUntraced(function* (id: Shell.ID, input?: Shell.OutputInput) {
         const session = yield* require(id)
@@ -222,10 +224,10 @@ const layer = () =>
         }
       })
 
-      const create = Effect.fn("Shell.create")(function* <E = never, R = never>(
+      const createWith = Effect.fn("Shell.create")(function* <E = never, R = never>(
+        selected: Effect.Effect<string>,
         input: Shell.CreateInput,
         before?: (input: ShellCreateBefore) => Effect.Effect<void, E, R>,
-        options?: CreateOptions,
       ) {
         const sessionID = input.metadata?.sessionID
         const sessionEnvironment =
@@ -236,7 +238,7 @@ const layer = () =>
           command: input.command,
           cwd: input.cwd ?? location.directory,
           timeout: input.timeout,
-          shell: yield* options?.acceptable ? shell.acceptable() : shell.preferred(),
+          shell: yield* selected,
           env: {
             ...(sessionEnvironment ?? process.env),
             TERM: "xterm-256color",
@@ -389,7 +391,22 @@ const layer = () =>
         return session.info
       })
 
-      return Service.of({ name, create, list, get, wait, timeout, output, remove })
+      const create: Interface["create"] = (input, before) => createWith(shell.preferred(), input, before)
+      const createConventional: Interface["createConventional"] = (input, before) =>
+        createWith(shell.conventional(), input, before)
+
+      return Service.of({
+        name,
+        create,
+        conventionalName,
+        createConventional,
+        list,
+        get,
+        wait,
+        timeout,
+        output,
+        remove,
+      })
     }),
   )
 

@@ -10,17 +10,19 @@ import { Global } from "@opencode-ai/util/global"
 import { State } from "../state.js"
 import { which } from "../util/which.js"
 
-const META: Record<string, { deny?: boolean; login?: boolean; ps?: boolean }> = {
+const META: Record<string, { login?: boolean; ps?: boolean }> = {
   bash: { login: true },
   dash: { login: true },
-  fish: { deny: true, login: true },
+  fish: { login: true },
   ksh: { login: true },
-  nu: { deny: true },
   powershell: { ps: true },
   pwsh: { ps: true },
   sh: { login: true },
   zsh: { login: true },
 }
+
+// Generated command syntax and permission scanning do not currently support these shell dialects.
+const UNCONVENTIONAL = new Set(["fish", "nu"])
 
 export type Item = {
   path: string
@@ -43,7 +45,7 @@ export type Draft = {
 
 export interface Interface extends State.Transformable<Draft> {
   readonly preferred: () => Effect.Effect<string>
-  readonly acceptable: () => Effect.Effect<string>
+  readonly conventional: () => Effect.Effect<string>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/ShellSelect") {}
@@ -71,8 +73,8 @@ function meta(file: string) {
   return META[name(file)]
 }
 
-function ok(file: string) {
-  return meta(file)?.deny !== true
+function isConventional(file: string) {
+  return !UNCONVENTIONAL.has(name(file))
 }
 
 function rooted(file: string) {
@@ -109,8 +111,8 @@ async function unix() {
   return ["/bin/bash", "/bin/zsh", "/bin/sh"]
 }
 
-function select(file: string | undefined, options?: Options, opts?: { acceptable?: boolean }, bin?: string) {
-  if (file && (!opts?.acceptable || ok(file))) {
+function select(file: string | undefined, options?: Options, opts?: { conventional?: boolean }, bin?: string) {
+  if (file && (!opts?.conventional || isConventional(file))) {
     const shell = resolve(file, options, bin)
     if (shell) return shell
   }
@@ -153,7 +155,7 @@ function info(file: string, options?: Options, bin?: string): Item {
   return {
     path: item,
     name: resolve(n, options, bin) ? n : item,
-    acceptable: ok(item),
+    acceptable: isConventional(item),
   }
 }
 
@@ -167,7 +169,7 @@ export function args(file: string, command: string) {
 }
 
 let defaultPreferred: { bin?: string; value: string } | undefined
-let defaultAcceptable: { bin?: string; value: string } | undefined
+let defaultConventional: { bin?: string; value: string } | undefined
 
 export function preferred(configShell?: string, options?: Options, bin?: string) {
   if (configShell) return select(configShell, options, undefined, bin)
@@ -182,18 +184,21 @@ preferred.reset = () => {
   defaultPreferred = undefined
 }
 
-export function acceptable(configShell?: string, options?: Options, bin?: string) {
-  if (configShell) return select(configShell, options, { acceptable: true }, bin)
-  if (options?.gitbash) return select(process.env.SHELL, options, { acceptable: true }, bin)
-  const cached = defaultAcceptable
+export function conventional(configShell?: string, options?: Options, bin?: string) {
+  if (configShell) return select(configShell, options, { conventional: true }, bin)
+  if (options?.gitbash) return select(process.env.SHELL, options, { conventional: true }, bin)
+  const cached = defaultConventional
   if (cached && cached.bin === bin) return cached.value
-  const value = select(process.env.SHELL, undefined, { acceptable: true }, bin) ?? fallback(bin)
-  defaultAcceptable = { bin, value }
+  const value = select(process.env.SHELL, undefined, { conventional: true }, bin) ?? fallback(bin)
+  defaultConventional = { bin, value }
   return value
 }
-acceptable.reset = () => {
-  defaultAcceptable = undefined
+conventional.reset = () => {
+  defaultConventional = undefined
 }
+
+/** @deprecated Use `conventional` instead. */
+export const acceptable = conventional
 
 export async function list(options?: Options, bin?: string): Promise<Item[]> {
   const shells = process.platform === "win32" ? win(options, bin) : await unix()
@@ -218,7 +223,7 @@ const layer = (options?: Options) =>
         transform: state.transform,
         reload: state.reload,
         preferred: () => Effect.sync(() => preferred(state.get().shell, options, global.bin)),
-        acceptable: () => Effect.sync(() => acceptable(state.get().shell, options, global.bin)),
+        conventional: () => Effect.sync(() => conventional(state.get().shell, options, global.bin)),
       })
     }),
   )

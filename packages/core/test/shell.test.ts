@@ -8,14 +8,14 @@ const withShell = async (shell: string | undefined, fn: () => void | Promise<voi
   const prev = process.env.SHELL
   if (shell === undefined) delete process.env.SHELL
   else process.env.SHELL = shell
-  ShellSelect.acceptable.reset()
+  ShellSelect.conventional.reset()
   ShellSelect.preferred.reset()
   try {
     await fn()
   } finally {
     if (prev === undefined) delete process.env.SHELL
     else process.env.SHELL = prev
-    ShellSelect.acceptable.reset()
+    ShellSelect.conventional.reset()
     ShellSelect.preferred.reset()
   }
 }
@@ -37,15 +37,15 @@ describe("shell", () => {
   test("falls back when configured shell cannot be resolved", async () => {
     await withShell(undefined, async () => {
       const preferred = ShellSelect.preferred()
-      const acceptable = ShellSelect.acceptable()
+      const conventional = ShellSelect.conventional()
       expect(ShellSelect.preferred("opencode-missing-shell")).toBe(preferred)
-      expect(ShellSelect.acceptable("opencode-missing-shell")).toBe(acceptable)
+      expect(ShellSelect.conventional("opencode-missing-shell")).toBe(conventional)
     })
   })
 
-  test("falls back for terminal-only acceptable shells", () => {
-    expect(ShellSelect.name(ShellSelect.acceptable("fish"))).not.toBe("fish")
-    expect(ShellSelect.name(ShellSelect.acceptable("nu"))).not.toBe("nu")
+  test("falls back from terminal-only shells to a conventional shell", () => {
+    expect(ShellSelect.name(ShellSelect.conventional("fish"))).not.toBe("fish")
+    expect(ShellSelect.name(ShellSelect.conventional("nu"))).not.toBe("nu")
   })
 
   test("builds command args per shell family", () => {
@@ -63,9 +63,9 @@ describe("shell", () => {
   })
 
   if (process.platform === "win32") {
-    test("rejects blacklisted shells case-insensitively", async () => {
+    test("falls back from unconventional shells case-insensitively", async () => {
       await withShell("NU.EXE", async () => {
-        expect(ShellSelect.name(ShellSelect.acceptable())).not.toBe("nu")
+        expect(ShellSelect.name(ShellSelect.conventional())).not.toBe("nu")
       })
     })
 
@@ -80,7 +80,7 @@ describe("shell", () => {
       const bash = ShellSelect.gitbash()
       if (!bash) return
       await withShell("/usr/bin/bash", async () => {
-        expect(ShellSelect.acceptable()).toBe(bash)
+        expect(ShellSelect.conventional()).toBe(bash)
         expect(ShellSelect.preferred()).toBe(bash)
       })
     })
@@ -88,10 +88,10 @@ describe("shell", () => {
     test("resolves bare bash to Git Bash before PATH", async () => {
       const bash = ShellSelect.gitbash()
       if (!bash) return
-      expect(ShellSelect.acceptable("bash")).toBe(bash)
+      expect(ShellSelect.conventional("bash")).toBe(bash)
       expect(ShellSelect.preferred("bash")).toBe(bash)
       await withShell("bash", async () => {
-        expect(ShellSelect.acceptable()).toBe(bash)
+        expect(ShellSelect.conventional()).toBe(bash)
         expect(ShellSelect.preferred()).toBe(bash)
       })
     })
